@@ -1,43 +1,57 @@
+import os
+import time
+import pytz
+from datetime import datetime, time as dtime
 from telethon import TelegramClient, events
-from telethon.tl.types import User, Chat, Channel 
 
-# --- METTI QUI I TUOI VALORI ---
-api_id = 33130141
-api_hash = "47a49d737b9dc584dc427daed5868cc9"
+# ================= CONFIG =================
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
 
-# --- CREA IL CLIENT ---
-client = TelegramClient("sessione.inoltro", api_id, api_hash)
+SESSION = "sessione"
 
-# ID del gruppo da monitorare
-GRUPPO_ID = [ -1001121869415 , -1002322369335 ]  # sostituisci con l'ID vero del gruppo
+GRUPPO_ID = [int(x.strip()) for x in os.environ["GRUPPO_ID"].split(",")]
+DESTINATARIO = int(os.environ["DESTINATARIO"])
 
-# username o ID del contatto destinatario
-DESTINATARIO = -1003306350006 # o ID numerico come intero
+WAIT_TIME = 600  # 10 minuti
+TIMEZONE = pytz.timezone("Europe/Rome")
+
+START_TIME = dtime(8, 0)
+END_TIME   = dtime(23, 59)
+# =========================================
+
+last_photo_time = {}
+
+def bot_should_run():
+    now = datetime.now(TIMEZONE).time()
+    return START_TIME <= now <= END_TIME
+
+client = TelegramClient(SESSION, API_ID, API_HASH)
 
 @client.on(events.NewMessage(chats=GRUPPO_ID))
 async def handler(event):
-    try:
-        chat = event.chat
-        if isinstance(chat, (Chat, Channel)):
-            nome_chat = chat.title
-        elif isinstance(chat, User):
-            nome_chat = chat.username or chat.first_name
-        else:
-            nome_chat = "Sconosciuto"
+    if not bot_should_run():
+        return
 
-        print(f"Nuovo messaggio da {nome_chat}")
+    msg = event.message
+    chat_id = event.chat_id
+    now = time.time()
 
-        await client.forward_messages(
-            DESTINATARIO,
-            event.message
-        )
-        print("Messaggio inoltrato!")
+    if msg.photo:
+        await client.forward_messages(DESTINATARIO, msg)
+        last_photo_time[chat_id] = now
+        print("📸 Foto inoltrata")
+        return
 
-    except Exception as e:
-        print("Errore nell'inoltro:", e)
+    if msg.text and chat_id in last_photo_time:
+        if now - last_photo_time[chat_id] <= WAIT_TIME:
+            await client.send_message(DESTINATARIO, msg.text)
+            print("📝 Testo successivo inoltrato")
 
-# --- AVVIO CLIENT ---
-client.start()
-print("Script avviato... in ascolto dei messaggi del gruppo.")
-client.run_until_disconnected()
+async def main():
+    await client.start()
+    print("🤖 Userbot avviato")
+    await client.run_until_disconnected()
 
+import asyncio
+asyncio.run(main())
